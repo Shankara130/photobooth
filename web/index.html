@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Photobooth</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Live view persisten: MJPEG dari server atau getUserMedia klien -->
+  <div id="live" class="live" hidden>
+    <img id="mjpg" alt="" hidden>
+    <video id="cam" playsinline autoplay muted hidden></video>
+    <div id="placeholder" hidden><span>PREVIEW NONAKTIF</span></div>
+  </div>
+
+  <div id="flash"></div>
+  <div id="toast" hidden></div>
+
+  <main id="boot" class="screen solid active">
+    <h1>Photobooth</h1>
+    <p class="muted">Memuat…</p>
+  </main>
+
+  <main id="home" class="screen">
+    <header class="topbar"><span id="home-status">…</span></header>
+    <div class="actions">
+      <button id="btn-start" class="btn primary">📸 MULAI</button>
+      <button id="btn-gallery" class="btn">GALERI</button>
+    </div>
+  </main>
+
+  <main id="countdown" class="screen overlay">
+    <p id="count-label" class="muted">Foto 1 dari 4</p>
+    <div id="count">3</div>
+  </main>
+
+  <main id="capturing" class="screen overlay">
+    <div class="spinner"></div>
+    <p>Memproses…</p>
+  </main>
+
+  <main id="review" class="screen overlay">
+    <div id="thumbs"></div>
+    <p id="review-note">Hebat! Bersiap lagi…</p>
+  </main>
+
+  <main id="composing" class="screen solid">
+    <div class="spinner"></div>
+    <p>Menyusun photo strip…</p>
+  </main>
+
+  <main id="result" class="screen solid">
+    <img id="strip-img" alt="photo strip">
+    <div class="qr-box">
+      <img id="qr-img" alt="QR unduh">
+      <p class="muted">Scan untuk unduh</p>
+    </div>
+    <div class="actions">
+      <a id="btn-download" class="btn primary" download>UNDUH</a>
+      <button id="btn-again" class="btn">ULANGI</button>
+      <button id="btn-home" class="btn">SELESAI</button>
+    </div>
+  </main>
+
+  <main id="gallery" class="screen solid">
+    <header class="topbar">
+      <button id="btn-gallery-back" class="btn small">‹ KEMBALI</button>
+      <span>Galeri</span>
+    </header>
+    <div id="gallery-grid"></div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
