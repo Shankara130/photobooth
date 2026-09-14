@@ -1,11 +1,13 @@
 //! Handler HTTP — semua route `/api/*` + static file (web/, data/).
 
 pub mod capture;
+pub mod events;
 pub mod info;
 pub mod photos;
 pub mod preview;
 pub mod qr;
 pub mod strip;
+pub mod trigger;
 pub mod upload;
 
 use axum::extract::DefaultBodyLimit;
@@ -26,6 +28,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/photos", get(photos::list_photos))
         .route("/api/photos/upload", post(upload::upload))
         .route("/api/strip", post(strip::compose))
+        .route("/api/events", get(events::events))
+        .route("/api/trigger/inject", post(trigger::inject))
         .route("/api/qr", get(qr::qr))
         .nest_service("/data", ServeDir::new(&state.data_dir))
         .fallback_service(ServeDir::new(&state.web_dir))

@@ -18,6 +18,19 @@ pub trait Camera: Send + Sync {
     /// Satu frame preview kecil (bytes JPEG) untuk stream MJPEG.
     fn preview(&self) -> CameraResult<Vec<u8>>;
     fn info(&self) -> serde_json::Value;
+    /// Drain event pemicu kamera (non-blocking) — hanya relevan untuk backend
+    /// dengan tethering event (gphoto2). Default: tidak ada peristiwa.
+    fn poll_triggers(&self) -> CameraResult<Vec<TriggerEvent>> {
+        Ok(Vec::new())
+    }
+}
+
+/// Peristiwa pemicu dari kamera (tombol shutter fisik).
+#[derive(Debug)]
+pub enum TriggerEvent {
+    /// Tombol shutter ditekan; `jpeg` = bytes yang sudah di-drain dari kamera
+    /// (di-download agar objek tidak tersangkut di RAM kamera — lihat gphoto.rs).
+    Shutter { jpeg: Vec<u8> },
 }
 
 #[derive(Debug, thiserror::Error)]

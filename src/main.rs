@@ -3,11 +3,13 @@
 
 mod api;
 mod camera;
+mod janitor;
 mod state;
 mod store;
 mod strip;
 mod textblocks;
 mod tls;
+mod trigger;
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -47,16 +49,80 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(4)
         .clamp(1, 8);
 
+    let trigger_mode = match trigger::TriggerMode::parse(&env_or("TRIGGER_MODE", "off")) {
+        Some(mode) => mode,
+        None => {
+            tracing::warn!("TRIGGER_MODE tidak valid — pakai off");
+            trigger::TriggerMode::Off
+        }
+    };
+
+    // Origin untuk QR: env QR_ORIGIN (mis. alamat home server) → IP LAN →
+    // fallback ke hostname browser kiosk di frontend. QR HARUS bisa di-scan
+    // dari HP tamu, jadi localhost tidak berguna.
+    let qr_origin = {
+        let custom = env_or("QR_ORIGIN", "").trim().trim_end_matches('/').to_string();
+        if !custom.is_empty() {
+            Some(custom)
+        } else {
+            lan_ip().map(|ip| format!("http://{ip}:{port}"))
+        }
+    };
+    if let Some(origin) = &qr_origin {
+        tracing::info!("origin QR: {origin}");
+    }
+
     let state = AppState {
         camera: camera::registry::backend_from_env()?,
         data_dir: std::path::PathBuf::from(env_or("DATA_DIR", "./data")),
         web_dir: std::path::PathBuf::from(env_or("WEB_DIR", "./web")),
         shots_per_strip,
         http_port: port,
+        trigger_mode,
+        qr_origin,
+        sync_target: {
+            let t = env_or("SYNC_TARGET", "").trim().to_string();
+            (!t.is_empty()).then_some(t)
+        },
+        retention_days: env_or("LOCAL_RETENTION_DAYS", "0")
+            .parse()
+            .unwrap_or(0),
+        events: tokio::sync::broadcast::channel::<String>(16).0,
     };
+    if trigger_mode != trigger::TriggerMode::Off && state.camera.name() != "gphoto2" {
+        tracing::warn!(
+            "TRIGGER_MODE hanya berarti untuk CAMERA_BACKEND=gphoto (backend aktif: {}) \
+             — endpoint inject tetap jalan",
+            state.camera.name()
+        );
+    }
     store::init_dirs(&state.data_dir).await?;
+    if trigger_mode != trigger::TriggerMode::Off {
+        trigger::spawn_watcher(state.clone());
+    }
+    janitor::spawn(state.clone());
 
     let app = api::router(state.clone());
+
+    // Server statis khusus publik (funnel) — HANYA /data (foto & strip),
+    // tanpa API — supaya yang terekspos ke internet tidak lebih dari perlu.
+    // Jalankan `tailscale funnel --bg $PUBLIC_PORT` untuk menerbitkannya.
+    let public_port: u16 = env_or("PUBLIC_PORT", "8091")
+        .parse()
+        .context("PUBLIC_PORT tidak valid (0 = matikan)")?;
+    if public_port != 0 {
+        let static_app = axum::Router::new()
+            .nest_service("/data", tower_http::services::ServeDir::new(&state.data_dir));
+        let pub_addr = SocketAddr::from(([127, 0, 0, 1], public_port));
+        let pub_listener = tokio::net::TcpListener::bind(pub_addr).await?;
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(pub_listener, static_app).await {
+                tracing::warn!("server publik /data berhenti: {e}");
+            }
+        });
+        tracing::info!("server publik /data (untuk funnel): 127.0.0.1:{public_port}");
+    }
+
     let http_addr = SocketAddr::from(([0, 0, 0, 0], port));
     let http = axum::serve(
         tokio::net::TcpListener::bind(http_addr).await?,

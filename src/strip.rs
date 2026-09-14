@@ -19,8 +19,19 @@ pub fn compose_strip(frames: &[Vec<u8>], taken: chrono::DateTime<chrono::Local>)
     let height = MARGIN + n * FRAME_H + (n - 1) * GAP + MARGIN + FOOTER_H;
     let mut canvas = RgbImage::from_pixel(STRIP_W, height, Rgb([255, 255, 255]));
 
-    for (i, jpeg) in frames.iter().enumerate() {
-        let frame = decode_frame(jpeg)?;
+    // Decode + resize tiap frame secara paralel — frame DSLR bisa 17 MP per foto.
+    let decoded: Vec<_> = std::thread::scope(|scope| {
+        let handles: Vec<_> = frames
+            .iter()
+            .map(|jpeg| scope.spawn(|| decode_frame(jpeg)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("thread decode frame"))
+            .collect()
+    });
+    for (i, frame) in decoded.into_iter().enumerate() {
+        let frame = frame?;
         let y = MARGIN + i as u32 * (FRAME_H + GAP);
         imageops::overlay(&mut canvas, &frame, MARGIN as i64, y as i64);
     }
@@ -42,6 +53,8 @@ pub fn compose_strip(frames: &[Vec<u8>], taken: chrono::DateTime<chrono::Local>)
 }
 
 /// Decode frame JPEG (hormati EXIF orientation) → RgbImage FRAME_W×FRAME_H.
+/// Kecilkan DULU baru terapkan orientasi — transpose 17 MP jauh lebih mahal
+/// dari 0.4 MP.
 fn decode_frame(jpeg: &[u8]) -> Result<RgbImage> {
     let reader = image::ImageReader::new(std::io::Cursor::new(jpeg))
         .with_guessed_format()
@@ -50,15 +63,28 @@ fn decode_frame(jpeg: &[u8]) -> Result<RgbImage> {
     let orientation = decoder
         .orientation()
         .unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut img = image::DynamicImage::from_decoder(decoder).context("decode frame JPEG")?;
-    img.apply_orientation(orientation);
-    Ok(center_crop_resize(img.to_rgb8()))
+    let img = image::DynamicImage::from_decoder(decoder).context("decode frame JPEG")?;
+    // Orientasi 90° menukar dimensi — crop pakai rasio tertukar agar pas
+    // setelah diputar di ukuran kecil (rotasi di ukuran kecil jauh lebih murah,
+    // hasil piksel setara).
+    let swaps = matches!(
+        orientation,
+        image::metadata::Orientation::Rotate90
+            | image::metadata::Orientation::Rotate270
+            | image::metadata::Orientation::Rotate90FlipH
+            | image::metadata::Orientation::Rotate270FlipH
+    );
+    let (tw, th) = if swaps { (FRAME_H, FRAME_W) } else { (FRAME_W, FRAME_H) };
+    let small = center_crop_resize(img.to_rgb8(), tw, th);
+    let mut out = image::DynamicImage::ImageRgb8(small);
+    out.apply_orientation(orientation);
+    Ok(out.to_rgb8())
 }
 
-/// Center-crop ke rasio frame (4:5) lalu resize ke FRAME_W×FRAME_H.
-fn center_crop_resize(img: RgbImage) -> RgbImage {
+/// Center-crop ke rasio target lalu resize (Lanczos3, kualitas penuh).
+fn center_crop_resize(img: RgbImage, target_w: u32, target_h: u32) -> RgbImage {
     let (w, h) = (img.width(), img.height());
-    let target = FRAME_W as f64 / FRAME_H as f64;
+    let target = target_w as f64 / target_h as f64;
     let cur = w as f64 / h as f64;
     let (cw, ch) = if cur > target {
         // terlalu lebar → crop kiri-kanan
@@ -70,8 +96,8 @@ fn center_crop_resize(img: RgbImage) -> RgbImage {
     let cropped = imageops::crop_imm(&img, (w - cw) / 2, (h - ch) / 2, cw, ch);
     imageops::resize(
         &cropped.to_image(),
-        FRAME_W,
-        FRAME_H,
+        target_w,
+        target_h,
         imageops::FilterType::Lanczos3,
     )
 }

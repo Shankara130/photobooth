@@ -17,6 +17,8 @@ pub async fn info(State(st): State<AppState>) -> Json<serde_json::Value> {
         "backend": st.camera.name(),
         "camera": camera,
         "shotsPerStrip": st.shots_per_strip,
+        "triggerMode": st.trigger_mode.as_str(),
+        "qrOrigin": st.qr_origin,
         "port": st.http_port,
         "features": {
             "serverCapture": !client_mode,
